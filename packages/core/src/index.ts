@@ -6,3 +6,7 @@ export * from "./classify.js";
 export * from "./openings.js";
 export * from "./report.js";
 export * from "./engine/types.js";
+export * from "./providers/http.js";
+export * from "./providers/chesscom.js";
+export * from "./providers/lichess.js";
+export * from "./providers/normalize.js";
