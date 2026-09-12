@@ -3,4 +3,8 @@ packages:
   - "packages/*"
 allowBuilds:
   esbuild: true
+  # El postinstall solo crea un symlink/copia de conveniencia del build FULL
+  # (113MB) a stockfish.js/.wasm; no usamos esos nombres (usamos las variantes
+  # "lite" directamente), así que no hace falta correrlo.
+  stockfish: false
   unrs-resolver: true

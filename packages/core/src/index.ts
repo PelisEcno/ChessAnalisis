@@ -5,3 +5,4 @@ export * from "./thresholds.js";
 export * from "./classify.js";
 export * from "./openings.js";
 export * from "./report.js";
+export * from "./engine/types.js";

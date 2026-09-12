@@ -18,6 +18,9 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      // Binarios de Stockfish vendorizados (minificados, de terceros): no
+      // son código nuestro, no hay nada que lintear ahí.
+      "public/engine/**",
     ],
   },
 ];
