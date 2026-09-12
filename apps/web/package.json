@@ -12,8 +12,10 @@
   },
   "dependencies": {
     "@peon-libre/core": "workspace:*",
+    "chess.js": "^1.4.0",
     "next": "15.5.25",
     "react": "19.1.0",
+    "react-chessboard": "^5.12.1",
     "react-dom": "19.1.0",
     "stockfish": "^18.0.8"
   },

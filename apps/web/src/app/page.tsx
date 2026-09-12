@@ -1,6 +1,8 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { savePendingGame } from "@/lib/pendingGame";
 
 type Platform = "chesscom" | "lichess";
 
@@ -15,6 +17,7 @@ interface GameSummary {
   black: { name: string; rating?: number };
   result: string;
   opening?: { eco?: string; name?: string };
+  pgn: string;
 }
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
@@ -66,6 +69,7 @@ const OUTCOME_STYLES: Record<string, string> = {
 };
 
 export default function Home() {
+  const router = useRouter();
   const [platform, setPlatform] = useState<Platform>("chesscom");
   const [username, setUsername] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
@@ -110,6 +114,17 @@ export default function Home() {
       setError(err instanceof Error ? err.message : String(err));
       setStatus("error");
     }
+  }
+
+  function handleAnalyze(game: GameSummary) {
+    savePendingGame({
+      pgn: game.pgn,
+      source: game.source,
+      sourceId: game.sourceId,
+      url: game.url,
+      perspectiveUsername: searchedUsername,
+    });
+    router.push("/analysis");
   }
 
   return (
@@ -196,14 +211,23 @@ export default function Home() {
                       {new Date(game.endedAt).toLocaleDateString("es-AR")}
                     </p>
                   </div>
-                  <a
-                    href={game.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="shrink-0 text-xs text-emerald-500 hover:underline"
-                  >
-                    ver
-                  </a>
+                  <div className="flex shrink-0 items-center gap-3 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => handleAnalyze(game)}
+                      className="text-emerald-500 hover:underline"
+                    >
+                      analizar
+                    </button>
+                    <a
+                      href={game.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-neutral-500 hover:underline"
+                    >
+                      ver
+                    </a>
+                  </div>
                 </li>
               );
             })}

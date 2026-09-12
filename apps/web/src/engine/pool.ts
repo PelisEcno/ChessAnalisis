@@ -16,6 +16,12 @@ export interface AnalyzeGameOptions {
   profile?: EngineProfile;
   multiPV?: number;
   onProgress?: (ply: number, total: number) => void;
+  /**
+   * Se llama apenas termina de analizarse cada posición (venga de caché o
+   * del motor), con su índice en `fens`. Permite mostrar resultados en
+   * streaming en vez de esperar a que termine toda la partida.
+   */
+  onResult?: (index: number, result: EngineResult) => void;
 }
 
 /**
@@ -92,6 +98,7 @@ export class EnginePool {
 
       if (!cached) await setCachedAnalysis(fen, depth, result);
       results.push(result);
+      options.onResult?.(i, result);
       options.onProgress?.(i + 1, fens.length);
     }
 

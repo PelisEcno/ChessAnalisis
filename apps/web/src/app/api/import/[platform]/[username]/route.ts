@@ -33,9 +33,11 @@ interface GameSummary {
   black: { name: string; rating: number | undefined };
   result: string;
   opening: { eco: string | undefined; name: string | undefined } | undefined;
+  /** PGN crudo, para poder abrir la partida en /analysis sin volver a pedirla. */
+  pgn: string;
 }
 
-function toSummary(normalized: NormalizedGame): GameSummary {
+function toSummary(normalized: NormalizedGame, pgn: string): GameSummary {
   const h = normalized.parsed.headers;
   return {
     source: normalized.source,
@@ -48,6 +50,7 @@ function toSummary(normalized: NormalizedGame): GameSummary {
     black: { name: h.black, rating: h.blackElo },
     result: h.result,
     opening: (h.eco ?? h.opening) ? { eco: h.eco, name: h.opening } : undefined,
+    pgn,
   };
 }
 
@@ -75,18 +78,20 @@ export async function GET(
   const userAgent = buildUserAgent();
 
   try {
-    let normalized: NormalizedGame[];
+    let games: GameSummary[];
 
     if (platform === "chesscom") {
       const raw = await getChessComRecentGames(username, limit, { userAgent });
-      normalized = raw.map((g) => normalizeGame(g, "chesscom"));
+      games = raw.map((g) => toSummary(normalizeGame(g, "chesscom"), g.pgn));
     } else if (platform === "lichess") {
       const raw = await getLichessUserGames(
         username,
         { max: limit, opening: true, clocks: true, sort: "dateDesc" },
         { userAgent },
       );
-      normalized = raw.map((g) => normalizeGame(g, "lichess"));
+      games = raw.map((g) =>
+        toSummary(normalizeGame(g, "lichess"), g.pgn ?? ""),
+      );
     } else {
       return NextResponse.json(
         {
@@ -96,7 +101,7 @@ export async function GET(
       );
     }
 
-    return NextResponse.json({ games: normalized.map(toSummary) });
+    return NextResponse.json({ games });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ error: message }, { status: 502 });
