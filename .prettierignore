@@ -1,0 +1,10 @@
+node_modules
+.next
+index.html
+.turbo
+dist
+build
+out
+pnpm-lock.yaml
+coverage
+data
