@@ -18,6 +18,12 @@ const EnvSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   /** Base pública de la API, usada para armar la callback URL de OAuth. */
   API_BASE_URL: z.url().default("http://localhost:4000"),
+  /**
+   * Threads UCI por instancia de Stockfish. Con concurrency=2 en la cola de
+   * análisis (ver queues/analysis.ts), el default de 4 satura una máquina
+   * de 8 cores; ajustar según el hardware disponible.
+   */
+  STOCKFISH_THREADS: z.coerce.number().int().positive().default(4),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

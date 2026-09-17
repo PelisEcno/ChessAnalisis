@@ -4,6 +4,7 @@ import {
   type EngineResult,
   type GameReport,
 } from "@peon-libre/core";
+import { env } from "../env.js";
 import { NativeStockfishEngine } from "../engine/nativeStockfish.js";
 import { redis } from "../redis.js";
 
@@ -47,7 +48,7 @@ export async function analyzeGamePgn(
     ...game.positions.map((p) => p.fenAfter),
   ];
 
-  const engine = new NativeStockfishEngine();
+  const engine = new NativeStockfishEngine("stockfish", env.STOCKFISH_THREADS);
   await engine.init();
 
   try {

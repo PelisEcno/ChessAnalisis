@@ -34,7 +34,10 @@ export class NativeStockfishEngine implements Engine {
   private pendingAnalysis: PendingAnalysis | null = null;
   private _engineId = "stockfish";
 
-  constructor(private readonly binaryPath: string = "stockfish") {}
+  constructor(
+    private readonly binaryPath: string = "stockfish",
+    private readonly threads: number = 1,
+  ) {}
 
   /** "Stockfish 16.1" o similar, tal como lo reporta el propio binario. */
   get engineId(): string {
@@ -64,9 +67,7 @@ export class NativeStockfishEngine implements Engine {
     });
 
     await this.waitForUciOk();
-    // El paralelismo se maneja a nivel de cuántos jobs concurrentes corre
-    // BullMQ, no dentro de cada motor individual.
-    this.send("setoption name Threads value 1");
+    this.send(`setoption name Threads value ${this.threads}`);
     await this.waitForReadyOk();
   }
 
