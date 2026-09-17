@@ -25,7 +25,7 @@ export function AccuracyCard({
   blackName,
 }: AccuracyCardProps) {
   return (
-    <div className="rounded border border-[var(--panel-border)] bg-[var(--panel)] p-3">
+    <div className="card p-3">
       <div className="flex justify-between">
         <div>
           <div className="truncate text-xs text-[var(--muted)]">

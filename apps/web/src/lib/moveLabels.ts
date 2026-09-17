@@ -11,9 +11,13 @@ export const MOVE_LABEL_META: Record<
     color: "var(--label-brilliant)",
   },
   great: { text: "Gran jugada", glyph: "!", color: "var(--label-great)" },
-  best: { text: "Mejor jugada", glyph: "", color: "var(--label-best)" },
-  excellent: { text: "Excelente", glyph: "", color: "var(--label-excellent)" },
-  good: { text: "Buena", glyph: "", color: "var(--label-good)" },
+  best: { text: "Mejor jugada", glyph: "✓", color: "var(--label-best)" },
+  excellent: {
+    text: "Excelente",
+    glyph: "✓",
+    color: "var(--label-excellent)",
+  },
+  good: { text: "Buena", glyph: "✓", color: "var(--label-good)" },
   inaccuracy: {
     text: "Imprecisión",
     glyph: "?!",

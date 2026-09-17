@@ -5,10 +5,12 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AccuracyCard } from "@/components/AccuracyCard";
 import { Board } from "@/components/Board";
+import { BrilliantMoments } from "@/components/BrilliantMoments";
 import { EngineLinesPanel } from "@/components/EngineLinesPanel";
 import { EvalBar } from "@/components/EvalBar";
 import { EvalGraph } from "@/components/EvalGraph";
 import { MoveList } from "@/components/MoveList";
+import { PlayerBar } from "@/components/PlayerBar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useGameAnalysis } from "@/hooks/useGameAnalysis";
 import { useGameNavigation } from "@/hooks/useGameNavigation";
@@ -79,6 +81,13 @@ export default function AnalysisPage() {
     [report],
   );
 
+  const moveBadge = useMemo(() => {
+    if (!currentAnnotated || !nav.lastMove) return null;
+    return { square: nav.lastMove.to, label: currentAnnotated.label };
+  }, [currentAnnotated, nav.lastMove]);
+
+  const sideToMove = sideToMoveFromFen(nav.currentFen);
+
   // Navegación por teclado: flechas, inicio/fin, F para voltear el tablero.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -125,16 +134,58 @@ export default function AnalysisPage() {
 
   const whiteName = report?.headers.white ?? "Blancas";
   const blackName = report?.headers.black ?? "Negras";
+  const whiteElo = report?.headers.whiteElo;
+  const blackElo = report?.headers.blackElo;
+  const whiteAccuracy = report?.players.w.accuracy;
+  const blackAccuracy = report?.players.b.accuracy;
+
+  const topPlayer =
+    nav.orientation === "white"
+      ? {
+          name: blackName,
+          color: "black" as const,
+          elo: blackElo,
+          accuracy: blackAccuracy,
+          toMove: sideToMove === "b",
+        }
+      : {
+          name: whiteName,
+          color: "white" as const,
+          elo: whiteElo,
+          accuracy: whiteAccuracy,
+          toMove: sideToMove === "w",
+        };
+  const bottomPlayer =
+    nav.orientation === "white"
+      ? {
+          name: whiteName,
+          color: "white" as const,
+          elo: whiteElo,
+          accuracy: whiteAccuracy,
+          toMove: sideToMove === "w",
+        }
+      : {
+          name: blackName,
+          color: "black" as const,
+          elo: blackElo,
+          accuracy: blackAccuracy,
+          toMove: sideToMove === "b",
+        };
 
   const rightPanel = (
     <div className="space-y-4">
       {report && (
-        <EvalGraph
-          points={graphPoints}
-          criticalPlies={criticalPlies}
-          currentPly={nav.cursor.kind === "main" ? nav.cursor.index : 0}
-          onSelectPly={nav.goToMain}
-        />
+        <BrilliantMoments moves={report.moves} onSelect={nav.goToMain} />
+      )}
+      {report && (
+        <div className="card p-3">
+          <EvalGraph
+            points={graphPoints}
+            criticalPlies={criticalPlies}
+            currentPly={nav.cursor.kind === "main" ? nav.cursor.index : 0}
+            onSelectPly={nav.goToMain}
+          />
+        </div>
       )}
       {report && (
         <AccuracyCard
@@ -143,13 +194,13 @@ export default function AnalysisPage() {
           blackName={blackName}
         />
       )}
-      <div className="rounded border border-[var(--panel-border)] bg-[var(--panel)] p-3">
+      <div className="card p-3">
         <h2 className="mb-2 text-xs font-semibold uppercase text-[var(--muted)]">
           Líneas del motor
         </h2>
         <EngineLinesPanel fen={nav.currentFen} result={liveResult} />
       </div>
-      <div className="rounded border border-[var(--panel-border)] bg-[var(--panel)] p-3 text-sm">
+      <div className="card p-3 text-sm">
         {currentAnnotated
           ? describeMove(currentAnnotated)
           : nav.cursor.kind === "variation"
@@ -172,7 +223,10 @@ export default function AnalysisPage() {
 
   return (
     <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
-      <header className="flex items-center justify-between border-b border-[var(--panel-border)] px-4 py-3">
+      <header
+        className="flex items-center justify-between bg-[var(--panel)] px-4 py-3"
+        style={{ boxShadow: "var(--elevation-1)" }}
+      >
         <Link href="/" className="text-lg font-semibold">
           Peón Libre
         </Link>
@@ -183,16 +237,17 @@ export default function AnalysisPage() {
 
       {status === "analyzing" && (
         <div className="px-4 pt-3">
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--panel-border)]">
+          <div className="card h-2 w-full overflow-hidden !rounded-full p-0">
             <div
-              className="h-full bg-[var(--accent)] transition-[width] duration-200"
+              className="h-full bg-[var(--accent)] transition-[width] duration-300 ease-out"
               style={{
                 width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%`,
               }}
             />
           </div>
           <p className="mt-1 text-xs text-[var(--muted)]">
-            Analizando… {progress.done}/{progress.total}
+            Analizando y reproduciendo la partida… {progress.done}/
+            {progress.total}
           </p>
         </div>
       )}
@@ -200,19 +255,36 @@ export default function AnalysisPage() {
       <div className="grid grid-cols-1 gap-4 p-4 lg:grid-cols-[minmax(0,480px)_260px_320px]">
         {/* Columna 1: tablero */}
         <div>
-          <div className="flex gap-2">
+          <PlayerBar
+            name={topPlayer.name}
+            color={topPlayer.color}
+            elo={topPlayer.elo}
+            accuracy={topPlayer.accuracy}
+            toMove={topPlayer.toMove}
+          />
+          <div className="my-1.5 flex gap-2">
             <EvalBar
               winPercent={currentWinPercent}
               flipped={nav.orientation === "black"}
             />
-            <Board
-              fen={nav.currentFen}
-              orientation={nav.orientation}
-              interactive
-              lastMove={nav.lastMove}
-              onPieceDrop={(from, to) => nav.tryPlayMove(from, to)}
-            />
+            <div className="card flex-1 overflow-hidden !rounded-2xl p-1.5">
+              <Board
+                fen={nav.currentFen}
+                orientation={nav.orientation}
+                interactive
+                lastMove={nav.lastMove}
+                moveBadge={moveBadge}
+                onPieceDrop={(from, to) => nav.tryPlayMove(from, to)}
+              />
+            </div>
           </div>
+          <PlayerBar
+            name={bottomPlayer.name}
+            color={bottomPlayer.color}
+            elo={bottomPlayer.elo}
+            accuracy={bottomPlayer.accuracy}
+            toMove={bottomPlayer.toMove}
+          />
           <div className="mt-3 flex items-center justify-center gap-1">
             <button
               type="button"
@@ -251,7 +323,7 @@ export default function AnalysisPage() {
             <button
               type="button"
               onClick={nav.flip}
-              className="nav-btn"
+              className="nav-btn nav-btn--accent"
               aria-label="Voltear tablero"
             >
               ⇅
@@ -283,7 +355,7 @@ export default function AnalysisPage() {
         </div>
 
         {/* Columna 2: lista de jugadas (solo desktop) */}
-        <div className="hidden max-h-[80vh] overflow-y-auto rounded border border-[var(--panel-border)] bg-[var(--panel)] lg:block">
+        <div className="card hidden max-h-[80vh] overflow-y-auto lg:block">
           {moveListPanel}
         </div>
 
