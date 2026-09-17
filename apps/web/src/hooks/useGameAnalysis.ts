@@ -53,6 +53,35 @@ export function useGameAnalysis(
     poolRef.current = pool;
     setStatus("analyzing");
 
+    // Con varios workers en paralelo (y sobre todo si la partida ya está
+    // cacheada entera de un análisis anterior), los resultados pueden
+    // llegar mucho más rápido de lo que React tarda en asentar un render:
+    // volcar cada uno directo a setState puede encadenar renders más
+    // rápido de lo que el navegador llega a confirmarlos, lo que React
+    // interpreta como actualizaciones anidadas sin fin. Por eso acá se
+    // juntan en variables y se aplican de a una vez por frame con
+    // requestAnimationFrame, que corre fuera del ciclo de render de React.
+    let rafId: number | null = null;
+    let pendingProgress: AnalysisProgress | null = null;
+    let pendingReport: GameReport | null = null;
+
+    function flushPending() {
+      rafId = null;
+      if (cancelled) return;
+      if (pendingProgress) {
+        setProgress(pendingProgress);
+        pendingProgress = null;
+      }
+      if (pendingReport) {
+        setReport(pendingReport);
+        pendingReport = null;
+      }
+    }
+
+    function scheduleFlush() {
+      if (rafId === null) rafId = requestAnimationFrame(flushPending);
+    }
+
     async function run() {
       try {
         const game: ParsedGame = parsePgn(pgn!);
@@ -69,14 +98,16 @@ export function useGameAnalysis(
           profile,
           multiPV: 3,
           onProgress: (done) => {
-            if (!cancelled) setProgress({ done, total });
+            if (cancelled) return;
+            pendingProgress = { done, total };
+            scheduleFlush();
           },
           onResult: (index, result) => {
             results[index] = result;
             if (cancelled) return;
 
-            // Los resultados llegan en orden estricto (el pool es secuencial),
-            // así que en este punto siempre están completos 0..index.
+            // Los resultados llegan en orden estricto (ver EnginePool), así
+            // que en este punto siempre están completos 0..index.
             const doneUpTo = index + 1;
             if (doneUpTo < 2) return;
 
@@ -85,9 +116,11 @@ export function useGameAnalysis(
               positions: game.positions.slice(0, doneUpTo - 1),
             };
             try {
-              setReport(
-                buildGameReport(partialGame, results.slice(0, doneUpTo)),
+              pendingReport = buildGameReport(
+                partialGame,
+                results.slice(0, doneUpTo),
               );
+              scheduleFlush();
             } catch {
               // No debería pasar, pero un reporte parcial fallido no es fatal.
             }
@@ -95,6 +128,9 @@ export function useGameAnalysis(
         });
 
         if (cancelled) return;
+        // No dejar ningún estado a mitad de camino esperando el próximo frame.
+        if (rafId !== null) cancelAnimationFrame(rafId);
+        flushPending();
         setStatus("done");
       } catch (err) {
         if (cancelled) return;
@@ -107,6 +143,7 @@ export function useGameAnalysis(
 
     return () => {
       cancelled = true;
+      if (rafId !== null) cancelAnimationFrame(rafId);
       pool.dispose();
     };
   }, [pgn, profile]);

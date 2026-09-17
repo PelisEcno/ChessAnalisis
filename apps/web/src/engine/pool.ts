@@ -17,63 +17,58 @@ export interface AnalyzeGameOptions {
   multiPV?: number;
   onProgress?: (ply: number, total: number) => void;
   /**
-   * Se llama apenas termina de analizarse cada posición (venga de caché o
-   * del motor), con su índice en `fens`. Permite mostrar resultados en
-   * streaming en vez de esperar a que termine toda la partida.
+   * Se llama en orden estricto (0, 1, 2, ...) apenas se completa cada
+   * posición (venga de caché o del motor), aunque el cómputo interno haya
+   * terminado en otro orden por correr en paralelo. Permite mostrar
+   * resultados en streaming en vez de esperar a que termine toda la partida.
    */
   onResult?: (index: number, result: EngineResult) => void;
 }
 
 /**
- * Cola que analiza una partida completa (lista de FEN, uno por ply) en
- * orden: Stockfish solo puede analizar una posición a la vez. Mantiene un
- * único Web Worker vivo entre llamadas, cachea por FEN+profundidad en
- * IndexedDB, y reinicia el motor si el worker muere a mitad de análisis.
+ * Cuántas instancias del motor correr en simultáneo, y cuántos threads le
+ * toca a cada una. Un solo motor con muchos threads tiene rendimientos
+ * decrecientes pasados los 3-4 threads (overhead de sincronización de la
+ * búsqueda), así que para analizar muchas posiciones distintas rinde más
+ * repartir los cores entre varias búsquedas en paralelo que apilarlos todos
+ * en una sola. Con pocos cores (mobile, VMs chicas) no vale la pena partir:
+ * una sola instancia con todo lo disponible es lo más simple y seguro.
+ */
+function poolSize(cores: number): number {
+  if (cores >= 6) return 2;
+  return 1;
+}
+
+function threadsPerEngine(cores: number, workers: number): number {
+  return Math.max(1, Math.floor((cores - 1) / workers));
+}
+
+/**
+ * Analiza una partida completa (lista de FEN, uno por ply) repartiendo las
+ * posiciones entre varias instancias de Stockfish que corren en paralelo,
+ * cada una en su propio Web Worker. Cachea por FEN+profundidad en
+ * IndexedDB, y reinicia cualquier instancia que muera a mitad de análisis.
  */
 export class EnginePool {
-  private engine: Engine | null = null;
+  private engines: Engine[] = [];
   private cancelled = false;
 
-  private async getEngine(): Promise<Engine> {
-    if (!this.engine) {
-      const engine = new StockfishWasmEngine();
-      await engine.init();
-      this.engine = engine;
-    }
-    return this.engine;
-  }
-
-  private async restartEngine(): Promise<Engine> {
-    this.engine?.dispose();
-    this.engine = null;
-    return this.getEngine();
-  }
-
-  private async analyzeOneWithRetry(
-    fen: string,
-    opts: { depth: number; multiPV: number },
-  ): Promise<EngineResult> {
-    const engine = await this.getEngine();
-    try {
-      return await engine.analyze(fen, opts);
-    } catch {
-      // El worker puede haber muerto (crash, memoria, etc.): lo reiniciamos
-      // una vez y reintentamos esta misma posición antes de rendirnos.
-      const restarted = await this.restartEngine();
-      return restarted.analyze(fen, opts);
-    }
+  private async createEngine(threads: number): Promise<StockfishWasmEngine> {
+    const engine = new StockfishWasmEngine(threads);
+    await engine.init();
+    return engine;
   }
 
   /** Pide que el análisis en curso pare lo antes posible. */
   cancel(): void {
     this.cancelled = true;
-    this.engine?.stop();
+    for (const engine of this.engines) engine.stop();
   }
 
-  /** Libera el worker. Después de esto hay que crear un EnginePool nuevo. */
+  /** Libera todos los workers. Después de esto hay que crear un EnginePool nuevo. */
   dispose(): void {
-    this.engine?.dispose();
-    this.engine = null;
+    for (const engine of this.engines) engine.dispose();
+    this.engines = [];
   }
 
   async analyzeGame(
@@ -84,24 +79,66 @@ export class EnginePool {
     const multiPV = options.multiPV ?? DEFAULT_MULTIPV;
 
     this.cancelled = false;
-    const results: EngineResult[] = [];
+    const results: (EngineResult | undefined)[] = new Array(fens.length);
+    let nextToAssign = 0;
+    let nextToEmit = 0;
 
-    for (let i = 0; i < fens.length; i++) {
-      if (this.cancelled) break;
-      const fen = fens[i]!;
+    // Emite en orden estricto (0, 1, 2, ...) aunque el cómputo interno haya
+    // terminado en otro orden por correr en paralelo. Quién consume esto
+    // (useGameAnalysis) es responsable de no volcar cada emisión directo a
+    // React: si muchas quedan listas casi juntas (por ejemplo, partida ya
+    // cacheada entera) hay que agruparlas antes de tocar el estado.
+    const emitReady = () => {
+      while (nextToEmit < fens.length && results[nextToEmit] !== undefined) {
+        options.onResult?.(nextToEmit, results[nextToEmit]!);
+        nextToEmit++;
+        options.onProgress?.(nextToEmit, fens.length);
+      }
+    };
 
-      const cached = await getCachedAnalysis(fen, depth);
-      const result =
-        cached ?? (await this.analyzeOneWithRetry(fen, { depth, multiPV }));
+    const cores =
+      typeof navigator !== "undefined" ? navigator.hardwareConcurrency || 2 : 2;
+    const workerCount = Math.min(poolSize(cores), fens.length || 1);
+    const threads = threadsPerEngine(cores, workerCount);
 
-      if (this.cancelled) break;
+    const runWorker = async (slot: number): Promise<void> => {
+      let engine = await this.createEngine(threads);
+      this.engines[slot] = engine;
 
-      if (!cached) await setCachedAnalysis(fen, depth, result);
-      results.push(result);
-      options.onResult?.(i, result);
-      options.onProgress?.(i + 1, fens.length);
-    }
+      while (!this.cancelled) {
+        const i = nextToAssign++;
+        if (i >= fens.length) return;
+        const fen = fens[i]!;
 
-    return results;
+        const cached = await getCachedAnalysis(fen, depth);
+        let result: EngineResult;
+        if (cached) {
+          result = cached;
+        } else {
+          try {
+            result = await engine.analyze(fen, { depth, multiPV });
+          } catch {
+            // El worker puede haber muerto (crash, memoria, etc.): lo
+            // reiniciamos una vez y reintentamos esta misma posición.
+            engine.dispose();
+            engine = await this.createEngine(threads);
+            this.engines[slot] = engine;
+            result = await engine.analyze(fen, { depth, multiPV });
+          }
+          if (this.cancelled) return;
+          await setCachedAnalysis(fen, depth, result);
+        }
+
+        if (this.cancelled) return;
+        results[i] = result;
+        emitReady();
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: workerCount }, (_, slot) => runWorker(slot)),
+    );
+
+    return results as EngineResult[];
   }
 }

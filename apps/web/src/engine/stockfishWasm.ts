@@ -49,6 +49,14 @@ export class StockfishWasmEngine implements Engine {
   private pendingReadyOk: Waiter | null = null;
   private pendingAnalysis: PendingAnalysis | null = null;
 
+  /**
+   * Threads a pedirle al motor si la build multihilo está disponible. Por
+   * default usa casi todos los cores (para el motor "en vivo" de una sola
+   * posición); EnginePool pasa un número menor a propósito, para poder
+   * correr varias instancias en paralelo sin sobre-suscribir los cores.
+   */
+  constructor(private readonly threadsOverride?: number) {}
+
   get isThreaded(): boolean {
     return this.threaded;
   }
@@ -75,7 +83,9 @@ export class StockfishWasmEngine implements Engine {
     await this.waitForUciOk();
 
     if (this.threaded) {
-      const threads = Math.max(1, (navigator.hardwareConcurrency || 2) - 1);
+      const threads =
+        this.threadsOverride ??
+        Math.max(1, (navigator.hardwareConcurrency || 2) - 1);
       this.send(`setoption name Threads value ${threads}`);
     }
     this.send("setoption name UCI_ShowWDL value true");

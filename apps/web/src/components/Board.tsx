@@ -2,7 +2,7 @@
 
 import type { MoveLabel } from "@peon-libre/core";
 import { Chessboard } from "react-chessboard";
-import type { CSSProperties } from "react";
+import { useCallback, useMemo, type CSSProperties } from "react";
 import { MOVE_LABEL_META } from "@/lib/moveLabels";
 
 export interface BoardArrow {
@@ -28,6 +28,18 @@ const LAST_MOVE_STYLE: CSSProperties = {
     "color-mix(in srgb, var(--board-last-move) 55%, transparent)",
 };
 
+// Objetos estables a nivel de módulo (no dependen de props): react-chessboard
+// puede usar la identidad de estos campos de `options` en sus propios efectos
+// internos, y pasarle uno nuevo en cada render (aunque el contenido sea
+// idéntico) le puede confundir el manejo de animaciones cuando `position`
+// cambia muy seguido, como al "seguir" una partida mientras se analiza.
+const DARK_SQUARE_STYLE: CSSProperties = {
+  backgroundColor: "var(--board-dark)",
+};
+const LIGHT_SQUARE_STYLE: CSSProperties = {
+  backgroundColor: "var(--board-light)",
+};
+
 /**
  * Wrapper fino sobre react-chessboard (MIT). No usa chessground: aunque el
  * prompt original lo pedía, chessground es GPLv3 real (su propio README
@@ -45,11 +57,54 @@ export function Board({
   arrows,
   moveBadge,
 }: BoardProps) {
-  const squareStyles: Record<string, CSSProperties> = {};
-  if (lastMove) {
-    squareStyles[lastMove.from] = LAST_MOVE_STYLE;
-    squareStyles[lastMove.to] = LAST_MOVE_STYLE;
-  }
+  const squareStyles = useMemo(() => {
+    if (!lastMove) return {};
+    return {
+      [lastMove.from]: LAST_MOVE_STYLE,
+      [lastMove.to]: LAST_MOVE_STYLE,
+    };
+  }, [lastMove]);
+
+  const mappedArrows = useMemo(
+    () =>
+      arrows?.map((a) => ({
+        startSquare: a.from,
+        endSquare: a.to,
+        color: a.color ?? "rgba(21,150,90,0.8)",
+      })),
+    [arrows],
+  );
+
+  const handlePieceDrop = useCallback(
+    ({
+      sourceSquare,
+      targetSquare,
+    }: {
+      sourceSquare: string;
+      targetSquare: string | null;
+    }) =>
+      onPieceDrop && targetSquare
+        ? onPieceDrop(sourceSquare, targetSquare)
+        : false,
+    [onPieceDrop],
+  );
+
+  const squareRenderer = useCallback(
+    ({ square, children }: { square: string; children?: React.ReactNode }) => (
+      <div
+        style={{
+          position: "relative",
+          width: "100%",
+          height: "100%",
+          ...squareStyles[square],
+        }}
+      >
+        {children}
+        {moveBadge?.square === square && <MoveBadge label={moveBadge.label} />}
+      </div>
+    ),
+    [squareStyles, moveBadge],
+  );
 
   return (
     <div className="aspect-square w-full select-none">
@@ -60,33 +115,12 @@ export function Board({
           allowDragging: interactive,
           squareStyles,
           animationDurationInMs: 220,
-          arrows: arrows?.map((a) => ({
-            startSquare: a.from,
-            endSquare: a.to,
-            color: a.color ?? "rgba(21,150,90,0.8)",
-          })),
-          onPieceDrop: onPieceDrop
-            ? ({ sourceSquare, targetSquare }) =>
-                targetSquare ? onPieceDrop(sourceSquare, targetSquare) : false
-            : undefined,
-          darkSquareStyle: { backgroundColor: "var(--board-dark)" },
-          lightSquareStyle: { backgroundColor: "var(--board-light)" },
+          arrows: mappedArrows,
+          onPieceDrop: onPieceDrop ? handlePieceDrop : undefined,
+          darkSquareStyle: DARK_SQUARE_STYLE,
+          lightSquareStyle: LIGHT_SQUARE_STYLE,
           showNotation: true,
-          squareRenderer: ({ square, children }) => (
-            <div
-              style={{
-                position: "relative",
-                width: "100%",
-                height: "100%",
-                ...squareStyles[square],
-              }}
-            >
-              {children}
-              {moveBadge?.square === square && (
-                <MoveBadge label={moveBadge.label} />
-              )}
-            </div>
-          ),
+          squareRenderer,
         }}
       />
     </div>
