@@ -27,7 +27,7 @@ const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
  */
 export function useGameAnalysis(
   pgn: string | null,
-  profile: EngineProfile = "normal",
+  profile: EngineProfile = "fast",
 ) {
   const [status, setStatus] = useState<AnalysisStatus>("idle");
   const [progress, setProgress] = useState<AnalysisProgress>({
