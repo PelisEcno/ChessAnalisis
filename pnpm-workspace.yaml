@@ -3,8 +3,13 @@ packages:
   - "packages/*"
 allowBuilds:
   esbuild: true
+  # Acelerador nativo opcional de msgpackr (usado por ioredis); si falla,
+  # cae solo al codec puro-JS, así que es seguro correrlo.
+  msgpackr-extract: true
   # El postinstall solo crea un symlink/copia de conveniencia del build FULL
   # (113MB) a stockfish.js/.wasm; no usamos esos nombres (usamos las variantes
   # "lite" directamente), así que no hace falta correrlo.
   stockfish: false
   unrs-resolver: true
+minimumReleaseAgeExclude:
+  - fastify@5.12.4

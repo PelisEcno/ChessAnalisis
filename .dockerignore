@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/out
+.git
+*.log
+.env
+.env.local
+apps/web/public/engine
+packages/core/data/eco

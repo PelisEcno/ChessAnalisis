@@ -7,6 +7,7 @@ export * from "./openings.js";
 export * from "./report.js";
 export * from "./analyze.js";
 export * from "./engine/types.js";
+export * from "./engine/uci.js";
 export * from "./providers/http.js";
 export * from "./providers/chesscom.js";
 export * from "./providers/lichess.js";

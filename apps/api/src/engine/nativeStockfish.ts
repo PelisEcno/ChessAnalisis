@@ -1,3 +1,5 @@
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { createInterface } from "node:readline";
 import {
   parseUciInfoLine,
   type Engine,
@@ -6,26 +8,9 @@ import {
   type EngineResult,
 } from "@peon-libre/core";
 
-// Builds "lite" de Stockfish 18 (paquete npm "stockfish", GPLv3,
-// https://github.com/nmrugg/stockfish.js), copiados a public/engine/ por
-// apps/web/scripts/copy-engine-assets.mjs. La build multihilo necesita
-// SharedArrayBuffer + crossOriginIsolated (headers COOP/COEP, configurados
-// en next.config.ts); si no están disponibles cae a la build monohilo.
-const THREADED_ENGINE_PATH = "/engine/stockfish-18-lite.js";
-const SINGLE_THREADED_ENGINE_PATH = "/engine/stockfish-18-lite-single.js";
-
 const DEFAULT_DEPTH = 18;
 
-export function supportsThreadedEngine(): boolean {
-  return (
-    typeof SharedArrayBuffer !== "undefined" &&
-    typeof crossOriginIsolated !== "undefined" &&
-    crossOriginIsolated
-  );
-}
-
 interface PendingAnalysis {
-  multiPV: number;
   lines: Map<number, EngineLineResult>;
   resolve: (result: EngineResult) => void;
   reject: (error: unknown) => void;
@@ -37,49 +22,51 @@ interface Waiter {
 }
 
 /**
- * Implementación de `Engine` con Stockfish compilado a WASM, corriendo en un
- * Web Worker dedicado. Cada instancia mantiene una sola conversación UCI: no
- * soporta análisis concurrentes (para analizar muchas posiciones en fila,
- * ver engine/pool.ts).
+ * Implementación de Engine con el binario nativo de Stockfish (instalado en
+ * la imagen Docker, ver Dockerfile), hablado por stdin/stdout en UCI. Mismo
+ * protocolo que la build WASM del navegador (apps/web/src/engine), pero acá
+ * corre nativo: mucho más rápido, se usa en el worker de análisis (fase 5).
  */
-export class StockfishWasmEngine implements Engine {
-  private worker: Worker | null = null;
-  private threaded = false;
+export class NativeStockfishEngine implements Engine {
+  private process: ChildProcessWithoutNullStreams | null = null;
   private pendingUciOk: Waiter | null = null;
   private pendingReadyOk: Waiter | null = null;
   private pendingAnalysis: PendingAnalysis | null = null;
+  private _engineId = "stockfish";
 
-  get isThreaded(): boolean {
-    return this.threaded;
+  constructor(private readonly binaryPath: string = "stockfish") {}
+
+  /** "Stockfish 16.1" o similar, tal como lo reporta el propio binario. */
+  get engineId(): string {
+    return this._engineId;
   }
 
   async init(): Promise<void> {
-    if (this.worker) return;
+    if (this.process) return;
 
-    this.threaded = supportsThreadedEngine();
-    const path = this.threaded
-      ? THREADED_ENGINE_PATH
-      : SINGLE_THREADED_ENGINE_PATH;
+    const proc = spawn(this.binaryPath, [], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    this.process = proc;
 
-    const worker = new Worker(path);
-    worker.onmessage = (event: MessageEvent<string>) => {
-      this.handleLine(event.data);
-    };
-    worker.onerror = (event) => {
+    createInterface({ input: proc.stdout }).on("line", (line) => {
+      this.handleLine(line);
+    });
+
+    proc.on("error", (error) => {
+      this.failEverything(error);
+    });
+    proc.on("exit", (code) => {
       this.failEverything(
-        new Error(`El worker de Stockfish falló: ${event.message}`),
+        new Error(`Stockfish terminó inesperadamente (código ${code}).`),
       );
-    };
-    this.worker = worker;
+      this.process = null;
+    });
 
     await this.waitForUciOk();
-
-    if (this.threaded) {
-      const threads = Math.max(1, (navigator.hardwareConcurrency || 2) - 1);
-      this.send(`setoption name Threads value ${threads}`);
-    }
-    this.send("setoption name UCI_ShowWDL value true");
-
+    // El paralelismo se maneja a nivel de cuántos jobs concurrentes corre
+    // BullMQ, no dentro de cada motor individual.
+    this.send("setoption name Threads value 1");
     await this.waitForReadyOk();
   }
 
@@ -87,7 +74,7 @@ export class StockfishWasmEngine implements Engine {
     fen: string,
     opts: EngineAnalysisOptions,
   ): Promise<EngineResult> {
-    if (!this.worker) {
+    if (!this.process) {
       throw new Error("Llamá a init() antes de analyze().");
     }
     if (this.pendingAnalysis) {
@@ -104,12 +91,7 @@ export class StockfishWasmEngine implements Engine {
       : `go depth ${opts.depth ?? DEFAULT_DEPTH}`;
 
     return new Promise<EngineResult>((resolve, reject) => {
-      this.pendingAnalysis = {
-        multiPV: opts.multiPV,
-        lines: new Map(),
-        resolve,
-        reject,
-      };
+      this.pendingAnalysis = { lines: new Map(), resolve, reject };
       this.send(goCommand);
     });
   }
@@ -119,15 +101,15 @@ export class StockfishWasmEngine implements Engine {
   }
 
   dispose(): void {
-    if (this.worker) {
+    if (this.process) {
       this.send("quit");
-      this.worker.terminate();
-      this.worker = null;
+      this.process.kill();
+      this.process = null;
     }
     this.failEverything(new Error("El motor fue destruido (dispose())."));
   }
 
-  /** Rechaza cualquier promesa pendiente (init o analyze): usado ante error del worker. */
+  /** Rechaza cualquier promesa pendiente (init o analyze): usado ante error o salida del proceso. */
   private failEverything(error: unknown): void {
     this.pendingUciOk?.reject(error);
     this.pendingUciOk = null;
@@ -138,7 +120,7 @@ export class StockfishWasmEngine implements Engine {
   }
 
   private send(command: string): void {
-    this.worker?.postMessage(command);
+    this.process?.stdin.write(command + "\n");
   }
 
   private waitForUciOk(): Promise<void> {
@@ -156,6 +138,11 @@ export class StockfishWasmEngine implements Engine {
   }
 
   private handleLine(line: string): void {
+    if (line.startsWith("id name ")) {
+      this._engineId = line.slice("id name ".length).trim();
+      return;
+    }
+
     if (line === "uciok") {
       this.pendingUciOk?.resolve();
       this.pendingUciOk = null;
