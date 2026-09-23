@@ -195,7 +195,7 @@ function accuracyLossLabel(deltaWin: number): MoveLabel {
 
 /**
  * Clasifica una jugada según, en este orden de prioridad: si sigue en libro,
- * si es brillante (sacrificio prácticamente único que mantiene la ventaja),
+ * si es brillante xd (sacrificio prácticamente único que mantiene la ventaja),
  * si es la única jugada que salva/mantiene la posición sin sacrificio, si
  * dejó pasar una victoria clara, y si no, según cuánto win% perdió respecto
  * a la mejor jugada disponible del motor.
